@@ -17,8 +17,9 @@ namespace NSwag.CodeGeneration.Models
     public abstract class ResponseModelBase
     {
         private readonly IOperationModel _operationModel;
-        private readonly SwaggerResponse _response;
-        private readonly JsonSchema4 _exceptionSchema;
+        private readonly OpenApiResponse _response;
+        private readonly OpenApiOperation _operation;
+        private readonly JsonSchema _exceptionSchema;
         private readonly IClientGenerator _generator;
         private readonly CodeGeneratorSettingsBase _settings;
         private readonly TypeResolverBase _resolver;
@@ -34,11 +35,12 @@ namespace NSwag.CodeGeneration.Models
         /// <param name="settings">The settings.</param>
         /// <param name="generator">The client generator.</param>
         protected ResponseModelBase(IOperationModel operationModel,
-            SwaggerOperation operation,
-            string statusCode, SwaggerResponse response, bool isPrimarySuccessResponse,
-            JsonSchema4 exceptionSchema, TypeResolverBase resolver, CodeGeneratorSettingsBase settings, IClientGenerator generator)
+            OpenApiOperation operation,
+            string statusCode, OpenApiResponse response, bool isPrimarySuccessResponse,
+            JsonSchema exceptionSchema, TypeResolverBase resolver, CodeGeneratorSettingsBase settings, IClientGenerator generator)
         {
             _response = response;
+            _operation = operation;
             _exceptionSchema = exceptionSchema;
             _generator = generator;
             _settings = settings;
@@ -47,20 +49,22 @@ namespace NSwag.CodeGeneration.Models
 
             StatusCode = statusCode;
             IsPrimarySuccessResponse = isPrimarySuccessResponse;
-            ActualResponseSchema = response.GetActualResponseSchema(operation);
+            ActualResponseSchema = response.Schema?.ActualSchema;
         }
 
         /// <summary>Gets the HTTP status code.</summary>
         public string StatusCode { get; }
 
         /// <summary>Gets the actual response schema.</summary>
-        public JsonSchema4 ActualResponseSchema { get; }
+        public JsonSchema ActualResponseSchema { get; }
 
         /// <summary>Gets a value indicating whether to check for the chunked HTTP status code (206, true when file response and 200/204).</summary>
         public bool CheckChunkedStatusCode => IsFile && (StatusCode == "200" || StatusCode == "204");
 
         /// <summary>Gets the type of the response.</summary>
-        public string Type => _generator.GetTypeName(ActualResponseSchema, IsNullable, "Response");
+        public string Type => 
+            _response.IsBinary(_operation) ? _generator.GetBinaryResponseTypeName() : 
+            _generator.GetTypeName(ActualResponseSchema, IsNullable, "Response");
 
         /// <summary>Gets a value indicating whether the response has a type (i.e. not void).</summary>
         public bool HasType => ActualResponseSchema != null;
@@ -84,7 +88,7 @@ namespace NSwag.CodeGeneration.Models
         public bool IsPlainText => _response.Content.ContainsKey("text/plain") || _operationModel.Produces == "text/plain";
 
         /// <summary>Gets a value indicating whether this is a file response.</summary>
-        public bool IsFile => ActualResponseSchema?.ActualSchema.Type == JsonObjectType.File;
+        public bool IsFile => _response.IsBinary(_operation);
 
         /// <summary>Gets the response's exception description.</summary>
         public string ExceptionDescription => !string.IsNullOrEmpty(_response.Description) ?
@@ -92,7 +96,7 @@ namespace NSwag.CodeGeneration.Models
             "A server side error occurred.";
 
         /// <summary>Gets the response schema.</summary>
-        public JsonSchema4 ResolvableResponseSchema => _response.Schema != null ? _resolver.GetResolvableSchema(_response.Schema) : null;
+        public JsonSchema ResolvableResponseSchema => _response.Schema != null ? _resolver.GetResolvableSchema(_response.Schema) : null;
 
         /// <summary>Gets a value indicating whether the response is nullable.</summary>
         public bool IsNullable => _response.IsNullable(_settings.SchemaType);
@@ -109,7 +113,9 @@ namespace NSwag.CodeGeneration.Models
             get
             {
                 if (IsPrimarySuccessResponse)
+                {
                     return true;
+                }
 
                 var primarySuccessResponse = _operationModel.Responses.FirstOrDefault(r => r.IsPrimarySuccessResponse);
                 return HttpUtilities.IsSuccessStatusCode(StatusCode) && (
@@ -124,5 +130,8 @@ namespace NSwag.CodeGeneration.Models
 
         /// <summary>Gets the response extension data.</summary>
         public IDictionary<string, object> ExtensionData => _response.ExtensionData;
+
+        /// <summary>Gets the produced mime type of this response if available.</summary>
+        public string Produces => _response.Content.Keys.FirstOrDefault();
     }
 }
